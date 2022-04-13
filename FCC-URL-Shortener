@@ -1,0 +1,63 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const app = express();
+const dns = require('dns');
+let urlIndex = 1;
+let urls = {"1": "http://www.google.com"};
+
+//require body parser
+const bodyParser = require('body-parser')
+
+// Basic Configuration
+const port = process.env.PORT || 3000;
+
+app.use(cors());
+
+app.use('/public', express.static(`${process.cwd()}/public`));
+
+// Call middleware function
+app.post('/api/shorturl', bodyParser.urlencoded({extended: false}));
+
+app.get('/', function(req, res) {
+  res.sendFile(process.cwd() + '/views/index.html');
+});
+
+// Your first API endpoint
+app.get('/api/hello', function(req, res) {
+  res.json({ greeting: 'hello API' });
+});
+
+// Provided a short URL, look it up and redirect
+app.get("/api/shorturl/:shortURL", function(req,res) {
+  if (urls.hasOwnProperty(req.params.shortURL)) {
+    res.redirect(urls[req.params.shortURL]);
+  } else {
+    res.json({error: "invalid url"});
+  }
+})
+
+app.post("/api/shorturl", function(req,res) {
+  const myURL = req.body.url;
+  const myRegex = /^https?:\/\//i;
+  
+  if (myRegex.test(myURL)) {
+    const domain = new URL(myURL).hostname;
+    
+    dns.lookup(domain, (err, addr) => {
+      if (err == null) {
+        urlIndex += 1;
+        urls[urlIndex] = myURL;
+        res.json({original_url: myURL,short_url: urlIndex});
+      } else {
+        res.json({error: "invalid url"})
+      }
+    })}
+    else {
+      res.json({error: "invalid url"})
+    }
+})
+
+app.listen(port, function() {
+  console.log(`Listening on port ${port}`);
+});
