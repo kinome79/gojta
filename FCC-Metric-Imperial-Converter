@@ -1,0 +1,357 @@
+/routes/api.js ---------------------------------------------------
+'use strict';
+
+const expect = require('chai').expect;
+const ConvertHandler = require('../controllers/convertHandler.js');
+
+module.exports = function (app) {
+  
+  let convertHandler = new ConvertHandler();
+
+  //catch get requests to /api/convert
+  app.route("/api/convert").get((req,res) => {
+
+    //get the number and unit from the input
+    const myValue = req.query.input;
+    const num = convertHandler.getNum(myValue);
+    const unit = convertHandler.getUnit(myValue);
+
+    //if ither unit or number come back invalid, return invalid
+    if (!num && !unit) {
+      return res.send("invalid number and unit");
+    } else if (!num) {
+      return res.send("invalid number");
+    } else if (!unit) {
+      return res.send("invalid unit");
+    }
+
+    //input is valid, get the conversion number and units
+    const rnum = convertHandler.convert(num, unit);
+    const runit = convertHandler.getReturnUnit(unit);
+
+    //return the appripriate values
+    res.json({
+      initNum: num, 
+      initUnit: unit, 
+      returnNum: rnum, 
+      returnUnit: runit, 
+      string: convertHandler.getString(num, unit, rnum, runit)});
+  });
+
+};
+
+
+
+
+
+/test/1_unit-tests.js ---------------------------------------------------
+const chai = require('chai');
+let assert = chai.assert;
+const ConvertHandler = require('../controllers/convertHandler.js');
+
+let convertHandler = new ConvertHandler();
+
+suite('Unit Tests', function(){
+
+  //Test Number Input
+  suite('Reading Number Input Tests', function(){
+    test('Whole Number Read', function (done) {
+      assert.strictEqual(convertHandler.getNum('12gal'), 12);
+      assert.strictEqual(convertHandler.getNum('3850kg'), 3850);
+      assert.strictEqual(convertHandler.getNum('180mi'), 180);
+      done();
+    });
+    test('Decimal Number Read', function(done){
+      assert.strictEqual(convertHandler.getNum('1.25gal'), 1.25);
+      assert.strictEqual(convertHandler.getNum('254.3kg'), 254.3);
+      assert.strictEqual(convertHandler.getNum('0.285mi'), .285);
+      done();
+    });
+    test('Fractional Number Read', function(done){
+      assert.strictEqual(convertHandler.getNum('1/4gal'), .25);
+      assert.strictEqual(convertHandler.getNum('2/3kg'), .66667);
+      assert.strictEqual(convertHandler.getNum('45/67mi'), .67164);
+      done();
+    });
+    test('Fractional w/ Decimal Number Read', function(done){
+      assert.strictEqual(convertHandler.getNum('2.5/8gal'), .3125);
+      assert.strictEqual(convertHandler.getNum('4.25/12kg'), .35417);
+      assert.strictEqual(convertHandler.getNum('5/10.5mi'), .47619);
+      done();
+    });
+    test('Error on Double Fraction/Decimal', function(done){
+      assert.isNull(convertHandler.getNum('2/5/8gal'));
+      assert.isNull(convertHandler.getNum('1/4/12kg'));
+      assert.isNull(convertHandler.getNum('2.5.3mi'));
+      assert.isNull(convertHandler.getNum('2.8.3/5mi'));
+      done();
+    });
+    test('No Number Value Read', function(done){
+      assert.strictEqual(convertHandler.getNum('gal'), 1);
+      assert.strictEqual(convertHandler.getNum('kg'), 1);
+      assert.strictEqual(convertHandler.getNum('mi'), 1);
+      done();
+    });
+  });
+  
+  //Test unit inputs
+  suite('Reading Unit Input Tests', function(){
+    test('Valid Unit Read', function(done){
+      assert.equal(convertHandler.getUnit("3.5GAL"), "gal");
+      assert.equal(convertHandler.getUnit("4/5.3Kg"), "kg");
+      assert.equal(convertHandler.getUnit("1/3l"), "L");
+      assert.equal(convertHandler.getUnit("2LBs"), "lbs");
+      assert.equal(convertHandler.getUnit("1/2.5kM"), "km");
+      assert.equal(convertHandler.getUnit("mi"), "mi");
+      done();
+    });
+    test('Error On Invalid Unit Test', function(done){
+      assert.isNull(convertHandler.getUnit('2cats'));
+      assert.isNull(convertHandler.getUnit('4kmhr'));
+      assert.isNull(convertHandler.getUnit('6GAllon'));
+      done();
+    });
+    test('Valid Return Unit Test', function(done){
+      assert.equal(convertHandler.getReturnUnit("gal"), "L");
+      assert.equal(convertHandler.getReturnUnit("L"), "gal");
+      assert.equal(convertHandler.getReturnUnit("mi"), "km");
+      assert.equal(convertHandler.getReturnUnit("km"), "mi");
+      assert.equal(convertHandler.getReturnUnit("lbs"), "kg");
+      assert.equal(convertHandler.getReturnUnit("kg"), "lbs");
+      done();
+    });
+    test('Valid Unit String Test', function(done){
+      assert.equal(convertHandler.getString(2, 'km', 2, 'mi'),                    
+                   "2 kilometers converts to 2 miles");
+      assert.equal(convertHandler.getString(2, 'mi', 2, 'km'),                    
+                   "2 miles converts to 2 kilometers");
+      assert.equal(convertHandler.getString(1, 'gal', 1, 'L'),                    
+                   "1 gallon converts to 1 liter");
+      assert.equal(convertHandler.getString(5, 'L', 5, 'gal'),                    
+                   "5 liters converts to 5 gallons");
+      assert.equal(convertHandler.getString(2, 'lbs', 2, 'kg'),                    
+                   "2 pounds converts to 2 kilograms");
+      assert.equal(convertHandler.getString(1, 'kg', 1, 'lbs'),                    
+                   "1 kilogram converts to 1 pound");
+      done();
+    });
+  });
+
+  //Test Conversion Outputs
+  suite('Converting Values Tests', function(){
+    test('Gal to L Test', function(done){
+      assert.strictEqual(convertHandler.convert(12, 'gal'), 45.42492);
+      assert.strictEqual(convertHandler.convert(3, 'gal'), 11.35623);
+      assert.strictEqual(convertHandler.convert(1.385, 'gal'), 5.24279);
+      done();
+    });
+    test('L to Gal Test', function(done){
+      assert.strictEqual(convertHandler.convert(12, 'L'), 3.17007);
+      assert.strictEqual(convertHandler.convert(3, 'L'), 0.79252);
+      assert.strictEqual(convertHandler.convert(1.385, 'L'), 0.36588);
+      done();
+    });
+    test('Mi to Km Test', function(done){
+      assert.strictEqual(convertHandler.convert(12, 'mi'), 19.31208);
+      assert.strictEqual(convertHandler.convert(3, 'mi'), 4.82802);
+      assert.strictEqual(convertHandler.convert(1.385, 'mi'), 2.22894);
+      done();
+    });
+    test('Km  to Mi Test', function(done){
+      assert.strictEqual(convertHandler.convert(12, 'km'), 7.45647);
+      assert.strictEqual(convertHandler.convert(3, 'km'), 1.86412);
+      assert.strictEqual(convertHandler.convert(1.385, 'km'), 0.86060);
+      done();
+    });
+    test('Lbs to Kg Test', function(done){
+      assert.strictEqual(convertHandler.convert(12, 'lbs'), 5.44310);
+      assert.strictEqual(convertHandler.convert(3, 'lbs'), 1.36078);
+      assert.strictEqual(convertHandler.convert(1.385, 'lbs'), 0.62822);
+      done();
+    });
+    test('Kg to Lbs Test', function(done){
+      assert.strictEqual(convertHandler.convert(12, 'kg'), 26.45549);
+      assert.strictEqual(convertHandler.convert(3, 'kg'), 6.61387);
+      assert.strictEqual(convertHandler.convert(1.385, 'kg'), 3.05340);
+      done();
+    });
+  });
+});
+
+
+
+
+
+
+/test/2_functional-tests.js ---------------------------------------------------
+const chaiHttp = require('chai-http');
+const chai = require('chai');
+let assert = chai.assert;
+const server = require('../server');
+
+chai.use(chaiHttp);
+
+suite('Functional Tests', function() {
+  this.timeout(5000);
+  suite('Standard GET request Test', function() {
+    test ('Valid GET request for 10L conversion', function(done) {
+      chai.request(server)
+      .get('/api/convert?input=10L')
+      .end(function(err,res) {
+        assert.equal(res.body.initNum, 10);
+        assert.equal(res.body.initUnit, 'L');
+        assert.equal(res.body.returnNum, 2.64172);
+        assert.equal(res.body.returnUnit, 'gal');
+        assert.equal(res.body.string, "10 liters converts to 2.64172 gallons");
+        done();
+      });
+    });
+    
+    test ('Valid GET request for 38Gal conversion', function(done) {
+      chai.request(server)
+      .get('/api/convert?input=38Gal')
+      .end(function(err,res) {
+        assert.equal(res.body.initNum, 38);
+        assert.equal(res.body.initUnit, 'gal');
+        assert.equal(res.body.returnNum, 143.84558);
+        assert.equal(res.body.returnUnit, 'L');
+        assert.equal(res.body.string, "38 gallons converts to 143.84558 liters");
+        done();
+      });
+    });
+    test ('Inavlid number GET request 3/8/4mi', function(done) {
+      chai.request(server)
+      .get('/api/convert?input=3/8/4mi')
+      .end(function(err,res) {
+        assert.equal(res.text, 'invalid number');
+        done();
+      });
+    });
+    test ('Inavlid number and unit GET request 3.8.2Kilographs', function(done) {
+      chai.request(server)
+      .get('/api/convert?input=3.8.2Kilographs')
+      .end(function(err,res) {
+        assert.equal(res.text, "invalid number and unit");
+        done();
+      });
+    });
+    test ('No number GET request, gal', function(done) {
+      chai.request(server)
+      .get('/api/convert?input=gal')
+      .end(function(err,res) {
+        assert.equal(res.body.initNum, 1);
+        assert.equal(res.body.initUnit, 'gal');
+        assert.equal(res.body.returnNum, 3.78541);
+        assert.equal(res.body.returnUnit, 'L');
+        assert.equal(res.body.string, "1 gallon converts to 3.78541 liters");
+        done();
+      });
+    })
+  });
+
+  const Browser = require('zombie');
+  Browser.site = 'https://boilerplate-project-metricimpconverter.kinome79.repl.co';
+  
+  suite('Browser Simulation requests', function() {
+    this.timeout(5000);
+
+    const browser = new Browser();
+    
+    suiteSetup(function(done){
+      return browser.visit('/',done);
+    });
+
+    suite('Headless browser', function() {
+      test('Should have a working "site" property', function() {
+        assert.isNotNull(browser.site);
+      });
+    });
+
+    suite('Test a site-based submission request', function() {
+      test('General submit request for 73lbs', function(done) {
+        browser.fill('#convertField', '73lbs').then(function() {
+          browser.pressButton('#convert', () => {
+            browser.assert.success();
+            browser.assert.text('p#result', '73 pounds converts to 33.11222 kilograms');
+            browser.assert.text('code#jsonResult', '{"initNum":73,"initUnit":"lbs","returnNum":33.11222,"returnUnit":"kg","string":"73 pounds converts to 33.11222 kilograms"}');
+            done();
+          });
+        });     
+      });
+    });
+  });
+});
+
+
+
+
+
+
+controllers/convertHandlers.js ---------------------------------------------------
+function ConvertHandler() {
+
+  //constants for unit and number conversion
+  const conversions = {
+    gal: ['L','liter',3.78541],
+    L: ['gal','gallon',0.26417218],
+    mi: ['km','kilometer',1.60934],
+    km: ['mi','mile',0.62137273],
+    lbs: ['kg','kilogram',0.453592],
+    kg: ['lbs','pound',2.20462442]
+  };
+
+  //Rex Expressions for stripping and testing the number values
+  const numRegex = /^[0-9.\/]*/;
+  const noSlashRegex = /^[0-9]*\.?[0-9]*$/;
+  const formatRegex = /^[0-9]*\.?[0-9]*\/?[0-9]*\.?[0-9]*$/;
+
+  //---function pulls and test number from input---
+  this.getNum = function(input) {
+    const myValue = input.match(numRegex)[0];
+
+    if(!myValue) {return 1};
+    
+    if (/\//.test(myValue)?formatRegex.test(myValue):noSlashRegex.test(myValue)) {
+      return Math.round((eval(myValue)* 100000))/100000;
+    } else {
+      return null
+    }
+  };
+
+  //---removes number and tests validity of the unit value---
+  this.getUnit = function(input) {
+    const theNum = input.match(numRegex)[0];
+    const myUnit = input.slice(theNum.length);
+    switch (myUnit.toLowerCase()) {
+      case 'l': return 'L'; break;
+      case 'gal': return 'gal'; break;
+      case 'km': return 'km'; break;
+      case 'mi': return 'mi'; break;
+      case 'kg': return 'kg'; break;
+      case 'lbs': return 'lbs'; break;
+      default: return null;
+    }
+  };
+
+  //---returns the conversion unit using conversions table
+  this.getReturnUnit = function(initUnit) {
+    return conversions[initUnit][0];
+  };
+
+  //---returns the converted value using conversions table
+  this.convert = function(initNum, initUnit) {
+    return Math.round((initNum * conversions[initUnit][2])*100000)/100000;
+  };
+
+  //---returns the conversion string given all values
+  this.getString = function(initNum, initUnit, returnNum, returnUnit) {
+    return initNum + " " + conversions[returnUnit][1]+(initNum == 1? '':'s')+
+      " converts to " + returnNum + " " + conversions[initUnit][1] + 
+      (returnNum == 1? '':'s');
+  };
+  
+}
+
+module.exports = ConvertHandler;
+
+
