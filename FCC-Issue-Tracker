@@ -1,0 +1,468 @@
+
+
+/routes/api.js
+---------------------------------------------------------------------------
+'use strict';
+const myDB = require('../database');
+module.exports = function (app) {
+
+    app.route('/api/issues/:project')
+    
+      .get(function (req, res){
+        let project = req.params.project;
+
+        myDB.handleGetRequest(project, req.query, (err, data) => {
+          if (err) {return res.json(err)}
+          res.json(data);
+        });
+        
+      })
+      
+      .post(function (req, res){
+        let project = req.params.project;
+        
+        myDB.handlePostRequest(project, req.body, (err, data) => {
+          if (err) {return res.json(err)}
+          res.json(data);
+        });
+        
+      })
+      
+      .put(function (req, res){
+        let project = req.params.project;
+
+        myDB.handlePutRequest(project, req.body, (err, data) => {
+          if (err) {return res.json(err)}
+          res.json(data);
+        });
+        
+      })
+      
+      .delete(function (req, res){
+        let project = req.params.project;
+
+        myDB.handleDeleteRequest(project, req.body._id, (err, data) => {
+          if (err) {return res.json(err)}
+          res.json(data);
+        });
+        
+      });
+
+};
+
+
+
+
+
+
+
+
+
+
+
+/database.js
+--------------------------------------------------------------------------------------
+//For this project I kept all database related tasks in a separate file database.js
+//This kept my routes file clean, and kept all database work to a single module
+
+'use strict'
+const mongoose = require('mongoose');
+const {Schema} = mongoose;
+ 
+//connect to mongo DB with mongoose
+mongoose.connect(process.env.MONGO_URI, {useNewUrlParser: true, useUnifiedTopology: true}).then(() => {
+    console.log('MongoDB connected!!');
+}).catch(err => {
+    console.log('Failed to connect to MongoDB', err);
+});
+
+//Create the Schema for issues
+const issueSchema = new Schema({
+  issue_title: {type: String},
+  issue_text: {type: String},
+  created_on: {type: Date, default: Date.now},
+  updated_on: {type: Date, default: Date.now},
+  created_by: {type: String},
+  assigned_to: {type: String, default: ""},
+  open:  {type: Boolean, required: true, default: true},
+  status_text: {type: String, default: ""}
+});
+
+//Create the Schema for projects containing issues
+const projectSchema = new Schema({
+  projectName: {type: String, required: true},
+  issues: [issueSchema]      
+});
+
+//Create a new Project model
+const Project = new mongoose.model('Project', projectSchema);
+
+//Functions to handle database requests----------------
+
+//---PUT Request Handler - perform changes to an issue by _id-------------
+const handlePutRequest = (project, data, done) => {
+  const possibleFields = ["issue_title", "issue_text", "created_by", "assigned_to", "open", "status_text"];
+  
+  //Verify _id is present in request
+  if (!data._id) {return done({error:"missing _id"})};
+
+  //Verify there is an included field to update
+  if (!(Object.keys(data).reduce((value, key) => value || possibleFields.includes(key), false))) 
+      {return done({error:"no update field(s) sent", _id: data._id})};
+
+  //Find project and update
+  Project.findOne({projectName: project}, (err, myProject) => {
+    if (err || !myProject) {return done({error:"could not update", _id: data._id})};
+
+    //Find issue in issues array, and remove
+    const myIssue = myProject.issues.id(data._id);
+
+    //If issue found, update and save the issue
+    if (myIssue) {
+      Object.assign(myIssue, data, {updated_on: new Date()});
+      myProject.save((e,d) => {
+        if(e){console.log (e); return done({error: "could not update", _id: data._id})};
+        done(null, {result: "successfully updated", _id: data._id});
+      });
+    } else {
+      done({error: "could not update", _id: data._id});
+    }
+});
+}
+
+//---GET Request Handler - return issues for a project----------------
+const handleGetRequest = (project, query, done) => {
+  //Find the project object
+  Project.find({projectName: project}, (err, myProject) => {
+    if (err) { return done(err)};
+
+    //Verify a project was returned
+    if(myProject.length > 0) {
+
+      //Notify on console if multiple projects exist
+      if (myProject.length > 1) {
+        console.log("ERROR: Multiple projects exist for: " + project);
+      }
+
+      //Get issues from the project
+      let myIssues = myProject[0].issues;
+
+      //If filters were indicated in URL, filter the array
+      if (query) {
+        myIssues = myIssues.filter(issue => {
+          let isEqual = true;
+          Object.keys(query).forEach( value => {
+            if(value == "open") { //need to convert string true to boolean
+              if (query[value] == 'true') {query[value] = true}
+              if (query[value] == 'false') {query[value] = false}
+            }
+            isEqual = isEqual && (!(issue[value]) || issue[value] == query[value]);
+          });
+          return isEqual;
+        })
+      }
+      //return filtered issues, or empty array if no project found
+      done(null, myIssues);
+    } else {done(null, [])}
+  })
+};
+
+//---POST Request Handler - Create new issues/project-----------
+const handlePostRequest = (project, data, done) => {
+  //Verify required feilds present
+  if (!(data.issue_title) || !(data.issue_text) || !(data.created_by)){
+    return (done({error: "required field(s) missing"}))}
+  
+  Project.findOne({projectName: project}, (err, myProject) => {
+    if(err){return done(err)};
+
+    //If project doesn't exist, creates new project
+    if (!myProject) {
+     myProject = new Project({projectName: project});
+    } 
+
+    //Create new issue using supplied data and schema defaults
+    myProject.issues.push(data);
+    myProject.save((e,d) => {
+      if(e) {return done(e)};
+      done(null, myProject.issues[myProject.issues.length - 1]);
+    });
+  });
+};
+
+//---DELETE Request Handler - Delete issues on a project-------
+const handleDeleteRequest = (project, _id, done) => {
+  //Error if no ID supplied
+  if (!_id) {return done({error:"missing _id"})};
+
+  //Find the project and remove issue if found
+  Project.findOne({projectName: project}, (err, myProject) => {
+    //Report if error or project not found
+    if(err || myProject.length < 1) {
+      return done({error: "could not delete", _id: _id})};
+
+    //Find issue in issues array, and remove
+    const myIssue = myProject.issues.id(_id);
+    if (myIssue) {
+      myIssue.remove();
+      myProject.save((e,d) => {
+        if(e){console.log (e); return done({error: "could not delete", _id: _id})};
+        done(null, {result: "successfully deleted", _id: _id});
+      });
+    } else {
+      done({error: "could not delete", _id: _id});
+    }
+  });
+};
+
+module.exports.handleGetRequest = handleGetRequest;
+module.exports.handlePutRequest = handlePutRequest;
+module.exports.handlePostRequest = handlePostRequest;
+module.exports.handleDeleteRequest = handleDeleteRequest;
+
+
+
+
+
+
+
+test/2_functional-tests.js
+-----------------------------------------------------------------------------------------------
+const chaiHttp = require('chai-http');
+const chai = require('chai');
+const assert = chai.assert;
+const server = require('../server');
+
+chai.use(chaiHttp);
+
+suite('Functional Tests', function() {
+  this.timeout(5000);
+  let _id1, _id2;
+  
+  suite('POST Request Tests', function() {
+    test('Create issue with every field included', function (done) {
+      const beforeDate = new Date();
+      chai.request(server)
+      .post('/api/issues/apitest')
+      .send({issue_title: "Test Issue Creation 1",
+            issue_text: "Simulated failure of an issue, all fields",
+            created_by: "Test System", 
+            assigned_to: "Return System", 
+            status_text: "In Testing, to be modified"})
+      .end(function (err, res) {
+        _id1 = res.body._id;
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isNotNull(res.body);
+        assert.equal(res.body.issue_title, "Test Issue Creation 1");
+        assert.equal(res.body.issue_text, "Simulated failure of an issue, all fields");
+        assert.equal(res.body.created_by, "Test System");
+        assert.equal(res.body.assigned_to, "Return System");
+        assert.equal(res.body.status_text, "In Testing, to be modified");
+        assert.isTrue(res.body.open);
+        assert.isAtLeast(new Date(res.body.created_on), beforeDate);
+        assert.isAtLeast(new Date(res.body.updated_on), beforeDate);
+        done();
+      });
+    });
+    test('Create issue with only required fields', function (done) {
+      const beforeDate = new Date();
+      chai.request(server)
+      .post('/api/issues/apitest')
+      .send({issue_title: "Test Issue Creation 2",
+            issue_text: "Simulated failure of an issue, req fields",
+            created_by: "Test System"})
+      .end(function (err, res) {
+        _id2 = res.body._id;
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isNotNull(res.body);
+        assert.equal(res.body.issue_title, "Test Issue Creation 2");
+        assert.equal(res.body.issue_text, "Simulated failure of an issue, req fields");
+        assert.equal(res.body.created_by, "Test System");
+        assert.equal(res.body.assigned_to, "");
+        assert.equal(res.body.status_text, "");
+        assert.isTrue(res.body.open);
+        assert.isAtLeast(new Date(res.body.created_on), beforeDate);
+        assert.isAtLeast(new Date(res.body.updated_on), beforeDate);
+        done();
+      });
+    });
+    test('Create issue missing required fields', function (done) {
+      chai.request(server)
+      .post('/api/issues/apitest')
+      .send({issue_title: "Test Issue Creation 3"})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isNotNull(res.body);
+        assert.equal(res.body.error, "required field(s) missing");
+        done();
+      });
+    });
+  });
+
+  suite('GET Request Tests', function() {
+    test('View issues on a project', function (done) {
+      chai.request(server)
+      .get('/api/issues/apitest')
+      .end(function (err,res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isArray(res.body);
+        assert.equal(res.body[res.body.length - 2].issue_title, 
+                    "Test Issue Creation 1");
+        assert.equal(res.body[res.body.length - 1].issue_title, 
+                    "Test Issue Creation 2");
+        done();
+      });
+    });
+    test('View issues on a project with a filter', function (done) {
+      chai.request(server)
+      .get('/api/issues/apitest?issue_title=Test Issue Creation 1')
+      .end(function (err,res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isArray(res.body);
+        assert.equal(res.body.length, 1);
+        assert.equal(res.body[0].issue_title, "Test Issue Creation 1");
+        done();
+      });
+    });
+    test('Views issues on with multiple filters', function (done) {
+      chai.request(server)
+      .get('/api/issues/apitest?issue_title=Test Issue Creation 1&open=true')
+      .end(function (err,res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isArray(res.body);
+        assert.equal(res.body.length, 1);
+        assert.equal(res.body[0].issue_title, "Test Issue Creation 1");
+        done();
+      });
+    });
+  });
+
+  suite('PUT Request Tests', function() {
+    test('Update a single field on an issue', function (done) {
+      chai.request(server)
+      .put('/api/issues/apitest')
+      .send({_id: _id1, status_text: "Currently Modifying"})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isNotNull(res.body);
+        assert.equal(res.body.result, "successfully updated");
+        assert.equal(res.body._id, _id1);
+        done();
+      });
+    });
+    test('Update multiple fields on an issue', function (done) {
+      chai.request(server)
+      .put('/api/issues/apitest')
+      .send({_id: _id2,
+            issue_text: "Modifying Mulitple Fields",
+            created_by: "Test Variety",
+            assigned_to: "Testing System", 
+            status_text: "Currently Modifying"})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.isNotNull(res.body);
+        assert.equal(res.body.result, "successfully updated");
+        assert.equal(res.body._id, _id2);
+        done();
+      });
+    });
+    test('Update an issue with a missing _id', function (done) {
+      chai.request(server)
+      .put('/api/issues/apitest')
+      .send({issue_text: "Modifying Mulitple Fields",
+            created_by: "Test Variety",
+            assigned_to: "Testing System", 
+            status_text: "Currently Modifying"})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.equal(res.body.error, "missing _id");
+        done();
+      });
+    });
+    test('Update an issue with no updated fields', function (done) {
+      chai.request(server)
+      .put('/api/issues/apitest')
+      .send({_id: _id2})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.equal(res.body.error, "no update field(s) sent");
+        assert.equal(res.body._id, _id2);
+        done();
+      });
+    });
+    test('Update an issue with an invalid _id', function (done) {
+      chai.request(server)
+      .put('/api/issues/apitest')
+      .send({_id: "12345",
+            issue_text: "Modifying Mulitple Fields"})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.equal(res.body.error, "could not update");
+        assert.equal(res.body._id, "12345");
+        done();
+      });
+    });
+  });
+
+  suite('DELETE Request Tests', function() {
+    test('Delete an issue using valid _id #1', function (done) {
+      chai.request(server)
+      .delete('/api/issues/apitest')
+      .send({_id: _id1})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.equal(res.body.result, "successfully deleted");
+        assert.equal(res.body._id, _id1);
+        done();
+      })
+    });
+    test('Delete an issue using valid _id #2', function (done) {
+      chai.request(server)
+      .delete('/api/issues/apitest')
+      .send({_id: _id2})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.equal(res.body.result, "successfully deleted");
+        assert.equal(res.body._id, _id2);
+        done();
+      })
+    });
+    test('Delete an issue with invalid _id', function (done) {
+      chai.request(server)
+      .delete('/api/issues/apitest')
+      .send({_id: "12345"})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.equal(res.body.error, "could not delete");
+        assert.equal(res.body._id, "12345");
+        done();
+      });
+    });
+    test('Delete an issue with missing _id', function (done) {
+      chai.request(server)
+      .delete('/api/issues/apitest')
+      .send({_id: ""})
+      .end(function (err, res) {
+        assert.equal(res.status, 200);
+        assert.equal(res.type, 'application/json');
+        assert.equal(res.body.error, "missing _id");
+        done();
+      });
+    });
+  });
+  
+});
