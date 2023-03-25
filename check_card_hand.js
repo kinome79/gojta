@@ -10,7 +10,7 @@ function pokerHands(arr) {
 
     scoreP1 = calcHand(handP1);
     scoreP2 = calcHand(handP2);
-    console.log(scoreP1)
+    
     for (let x in scoreP1) {
       if (scoreP1[x] > scoreP2[x]) {
         winsP1++;
